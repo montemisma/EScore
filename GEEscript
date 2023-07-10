@@ -1,0 +1,572 @@
+// Supplement to the paper: "Breaking the ESG rating divergence: an open geospatial framework
+// for environmental scores" by Rossi et al.
+
+// Script complied by Cristian Rossi and Jack Hepper.
+
+// Steps you need to take: 
+
+// STEP 1:
+// Input a shapefile of the area to investigate. Click Assets (on left) -> New -> Upload. 
+// Once processing has finished, import from Assets to script, and rename table to ald.
+
+// STEP 2:
+// Define the variables below. Input the start dates in 'YYYY-MM-DD' format. Input the
+// monitoring peiod length of each period as a number of weeks. (4 is suggested.)
+
+var firstPeriodStarts = '2020-08-01';
+var secondPeriodStarts = '2022-08-01';
+var monitoringPeriodWeeks = 4;
+
+// STEP 3 (FINAL):
+// Input variables on line 463 and 464 (Important!). Run script and use outputs under Console 
+// (on right) and Layers (below) to derive E-Score for asset. Note comments on lines 308, 365, 
+// and 441 to assist you in interpretation.
+
+// **************************************************************************************** //
+// ************************** E Land Cover Change Score *********************************** //
+// **************************************************************************************** //
+
+// Script to compute newly anthropogenic areas from two land cover products 
+
+// ---------------------------------------------------------------------------------------- //
+
+// Display the shapefile into the interactive map
+
+// Centre the view.
+
+Map.centerObject(ald);
+
+// Define styling and determine the color of the shapefile (hex starting
+// with '00' denotes full transparency).
+
+var styling = {color: 'red', fillColor: '00000000'};
+Map.addLayer(ald.style(styling), '',  'AoI');
+
+// --------------------------------------------------------------------------------------- //
+
+// Dates
+// First Monitoring Period
+var startDate = firstPeriodStarts;
+var endDate = ee.Date(startDate).advance(monitoringPeriodWeeks, 'week');
+print('First monitoring period:', startDate, 'to', 
+      (ee.Date(endDate).format()).slice(0,10)); 
+
+// Second Monitoring Period
+var startDate2 = secondPeriodStarts;
+var endDate2 = ee.Date(startDate2).advance(monitoringPeriodWeeks, 'week');
+print('Second monitoring period:', startDate2, 'to', 
+      (ee.Date(endDate2).format()).slice(0,10));
+
+// Creating multi-temporal composites from Dynamic World
+
+// Filtering the Dynamic World NRT collection by monitoring period and location
+
+var dwCollectionOne = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+  .filter(ee.Filter.date(startDate, endDate))
+  .filter(ee.Filter.bounds(ald));
+
+// Creating a mode composite from the temporally- and spatially-subset Dyanmic World collection
+
+var classification = dwCollectionOne.select('label');
+var dwComposite = classification.reduce(ee.Reducer.mode());
+
+var dwVisParams = {
+  min: 0,
+  max: 8,
+  palette: ['#419BDF', '#397D49', '#88B053', '#7A87C6',
+    '#E49635', '#DFC35A', '#C4281B', '#A59B8F', '#B39FE1']
+};
+
+// Clipping the composite and adding it to the map
+
+var title1 = ee.String('Classified Composite for Period Starting ')
+    .cat(startDate.slice(0,4));
+Map.addLayer(dwComposite.clip(ald), dwVisParams, title1.getInfo()); 
+
+// Creating a Top-1 Probability Hillshade visualisation
+// See developers.google.com/earth-engine/tutorials/community/introduction-to-dynamic-world-pt-1
+// for explanation
+
+var probabilityBands = [
+    'water', 'trees', 'grass', 'flooded_vegetation', 'crops',
+    'shrub_and_scrub', 'built', 'bare', 'snow_and_ice'
+    ];
+
+// Select probability bands 
+var probabilityCol = dwCollectionOne.select(probabilityBands);
+
+// Create a multi-band image with the average pixel-wise probability 
+// for each band across the time-period
+var meanProbability = probabilityCol.reduce(ee.Reducer.mean());
+
+// Composites have a default projection that is not suitable
+// for hillshade computation.
+// Set a EPSG:3857 projection with 10m scale
+var projection = ee.Projection('EPSG:3857').atScale(10);
+var meanProbability = meanProbability.setDefaultProjection(projection);
+
+// Creating the Top1 Probability Hillshade visualisation
+var top1Probability = meanProbability.reduce(ee.Reducer.max());
+var top1Confidence = top1Probability.multiply(100).int();
+var hillshade = ee.Terrain.hillshade(top1Confidence).divide(255);
+var rgbImage = dwComposite.visualize(dwVisParams).divide(255);
+var probabilityHillshade = rgbImage.multiply(hillshade);
+
+var hillshadeVisParams = {min:0, max:0.8};
+var probabilityHillshadeTitle1 = ee.String('Probability Hillshade for Period Starting ')
+    .cat(startDate.slice(0,4));
+Map.addLayer(probabilityHillshade.clip(ald),
+  hillshadeVisParams, probabilityHillshadeTitle1.getInfo());
+
+// Creating multi-temporal composites from Dynamic World: Second period
+
+// Filter the Dynamic World NRT collection by monitoring period and location
+
+var dwCollectionTwo = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+  .filter(ee.Filter.date(startDate2, endDate2))
+  .filter(ee.Filter.bounds(ald));
+
+// Create a mode composite from the temporally- and spatially-subset Dyanmic World collection
+
+var classification = dwCollectionTwo.select('label');
+var dwComposite2 = classification.reduce(ee.Reducer.mode());
+
+var dwVisParams = {
+  min: 0,
+  max: 8,
+  palette: ['#419BDF', '#397D49', '#88B053', '#7A87C6',
+    '#E49635', '#DFC35A', '#C4281B', '#A59B8F', '#B39FE1']
+};
+
+// Clip the composite and add it to the Map
+
+var title2 = ee.String('Classified Composite for Period Starting ')
+    .cat(startDate2.slice(0,4));
+Map.addLayer(dwComposite2.clip(ald), dwVisParams, title2.getInfo());
+
+// Create a Top-1 Probability Hillshade Visualization
+var probabilityBands = [
+    'water', 'trees', 'grass', 'flooded_vegetation', 'crops',
+    'shrub_and_scrub', 'built', 'bare', 'snow_and_ice'
+    ];
+
+// Select probability bands 
+var probabilityCol2 = dwCollectionTwo.select(probabilityBands);
+
+// Create a multi-band image with the average pixel-wise probability 
+// for each band across the time-period
+var meanProbability2 = probabilityCol2.reduce(ee.Reducer.mean());
+
+// Composites have a default projection that is not suitable
+// for hillshade computation.
+// Set a EPSG:3857 projection with 10m scale
+var projection = ee.Projection('EPSG:3857').atScale(10);
+var meanProbability2 = meanProbability2.setDefaultProjection(projection);
+
+// Create the Top1 Probability Hillshade
+var top1Probability2 = meanProbability2.reduce(ee.Reducer.max());
+var top1Confidence2 = top1Probability2.multiply(100).int();
+var hillshade2 = ee.Terrain.hillshade(top1Confidence2).divide(255);
+var rgbImage2 = dwComposite2.visualize(dwVisParams).divide(255);
+var probabilityHillshade2 = rgbImage2.multiply(hillshade2);
+
+var hillshadeVisParams = {min:0, max:0.8};
+var probabilityHillshadeTitle2 = ee.String('Probability Hillshade for Period Starting ')
+    .cat(startDate2.slice(0,4));
+Map.addLayer(probabilityHillshade2.clip(ald),
+  hillshadeVisParams, probabilityHillshadeTitle2.getInfo());
+  
+
+// // ----------------------------------------------------------------------- //
+// // Detect changes from natural to anthropogenic ------------------------- //
+
+// anthropogenic
+//built areas
+var dw_built = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+            .filterBounds(ald)
+            .select('built');
+
+var beforeDw_built = dw_built.filterDate(startDate, endDate).mean();
+var afterDw_built = dw_built.filterDate(startDate2, endDate2).mean();
+
+// bare ground
+var dw_bare = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+            .filterBounds(ald)
+            .select('bare');
+
+var beforeDw_bare = dw_bare.filterDate(startDate, endDate).mean();
+var afterDw_bare = dw_bare.filterDate(startDate2, endDate2).mean();
+
+// crops
+var dw_crops = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+            .filterBounds(ald)
+            .select('crops');
+
+var beforeDw_crops = dw_crops.filterDate(startDate, endDate).mean();
+var afterDw_crops = dw_crops.filterDate(startDate2, endDate2).mean();
+
+// natural
+
+//water
+var dw_water = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+            .filterBounds(ald)
+            .select('water');
+
+var beforeDw_water = dw_water.filterDate(startDate, endDate).mean();
+var afterDw_water = dw_water.filterDate(startDate2, endDate2).mean();
+
+// trees
+var dw_trees = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+            .filterBounds(ald)
+            .select('trees');
+
+var beforeDw_trees = dw_trees.filterDate(startDate, endDate).mean();
+var afterDw_trees = dw_trees.filterDate(startDate2, endDate2).mean();
+
+// grass	
+var dw_grass = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+            .filterBounds(ald)
+            .select('grass');
+
+var beforeDw_grass = dw_grass.filterDate(startDate, endDate).mean();
+var afterDw_grass	= dw_grass.filterDate(startDate2, endDate2).mean();
+
+//flooded_vegetation	
+var dw_flooded_vegetation = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+            .filterBounds(ald)
+            .select('flooded_vegetation');
+
+var beforeDw_flooded_vegetation = dw_flooded_vegetation.filterDate(startDate, endDate).mean();
+var afterDw_flooded_vegetation = dw_flooded_vegetation.filterDate(startDate2, endDate2).mean();
+
+// shrub_and_scrub
+var dw_shrub_and_scrub = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+            .filterBounds(ald)
+            .select('shrub_and_scrub');
+
+var beforeDw_shrub_and_scrub = dw_shrub_and_scrub.filterDate(startDate, endDate).mean();
+var afterDw_shrub_and_scrub = dw_shrub_and_scrub.filterDate(startDate2, endDate2).mean();
+
+// snow and ice
+var dw_snow_and_ice = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+            .filterBounds(ald)
+            .select('snow_and_ice');
+
+var beforeDw_snow_and_ice = dw_snow_and_ice.filterDate(startDate, endDate).mean();
+var afterDw_snow_and_ice = dw_snow_and_ice.filterDate(startDate2, endDate2).mean();
+
+// Selecting pixels that were water and are now anthropogenic
+
+var newAntro_fromWater = beforeDw_water.gt(0.35).and((afterDw_built.gt(0.35)).or(afterDw_bare.gt(0.35)).or(afterDw_crops.gt(0.35)));
+
+var changeVisParams = {min: 0, max: 1, palette: ['white', 'red']};
+Map.addLayer(newAntro_fromWater.clip(ald), changeVisParams, 'New Anthropogenic from Water');
+
+// Trees to Anthro
+
+var newAntro_fromTrees = beforeDw_trees.gt(0.35).and((afterDw_built.gt(0.35)).or(afterDw_bare.gt(0.35)).or(afterDw_crops.gt(0.35)));
+
+var changeVisParams = {min: 0, max: 1, palette: ['white', 'red']};
+Map.addLayer(newAntro_fromTrees.clip(ald), changeVisParams, 'New Anthropogenic from Trees');
+
+// Grass to Anthro
+
+var newAntro_fromGrass = beforeDw_grass.gt(0.35).and((afterDw_built.gt(0.35)).or(afterDw_bare.gt(0.35)).or(afterDw_crops.gt(0.35)));
+
+var changeVisParams = {min: 0, max: 1, palette: ['white', 'red']};
+Map.addLayer(newAntro_fromGrass.clip(ald), changeVisParams, 'New Anthropogenic from Grass');
+
+// Flooded Vegetation to Anthro
+
+var newAntro_fromFlood = beforeDw_flooded_vegetation.gt(0.35).and((afterDw_built.gt(0.35)).or(afterDw_bare.gt(0.35)).or(afterDw_crops.gt(0.35)));
+
+var changeVisParams = {min: 0, max: 1, palette: ['white', 'red']};
+Map.addLayer(newAntro_fromFlood.clip(ald), changeVisParams, 'New Anthropogenic from Flooded Vegetation');
+
+// Shrubs to Anthro
+
+var newAntro_fromShrubs = beforeDw_shrub_and_scrub.gt(0.35).and((afterDw_built.gt(0.35)).or(afterDw_bare.gt(0.35)).or(afterDw_crops.gt(0.35)));
+
+var changeVisParams = {min: 0, max: 1, palette: ['white', 'red']};
+Map.addLayer(newAntro_fromShrubs.clip(ald), changeVisParams, 'New Anthropogenic from Shrubs');
+
+// Display all new anthropogenic areas
+
+var newAntro = (beforeDw_grass.gt(0.35).or(beforeDw_trees.gt(0.35)).or(beforeDw_water.gt(0.35)).or(beforeDw_flooded_vegetation.gt(0.35)).or(beforeDw_shrub_and_scrub.gt(0.35))).and((afterDw_built.gt(0.35)).or(afterDw_bare.gt(0.3)).or(afterDw_crops.gt(0.3)));
+
+var changeVisParams = {min: 0, max: 1, palette: ['white', 'red']};
+Map.addLayer(newAntro.clip(ald), changeVisParams, 'New Anthropogenic areas');
+  
+
+// ------------------------------------------------------------------------------ //
+// ---- Visualisation check ------------------------------------------------------
+
+var s2 = ee.ImageCollection('COPERNICUS/S2')
+            .filterBounds(ald)
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 35));
+
+var beforeS2 = s2.filterDate(startDate, endDate).median();
+var afterS2 = s2.filterDate(startDate2, endDate2).median();
+
+// Adjust stretch (min / max values) if images are too washed out; alternatively
+// use settings accessible from layer menu on map
+
+// Sentinel image one (earlier)
+
+var s2VisParams1 = {bands: ['B4', 'B3', 'B2'], min: 0, max: 3000};
+var s2VisTitle1 = ee.String('Sentinel-2 Image for Period Starting ')
+    .cat(startDate.slice(0,4));
+Map.addLayer(beforeS2.clip(ald), s2VisParams1, s2VisTitle1.getInfo());
+
+// Sentinel image two (later)
+
+var s2VisParams2 = {bands: ['B4', 'B3', 'B2'], min: 0, max: 3000};
+var s2VisTitle2 = ee.String('Sentinel-2 Image for Period Starting ')
+    .cat(startDate2.slice(0,4));
+Map.addLayer(afterS2.clip(ald), s2VisParams2, s2VisTitle2.getInfo());
+
+Map.addLayer(newAntro.selfMask().clip(ald), changeVisParams, 'New Anthropogenic areas (Masked)');
+    
+// ------------------------------------------------------------------------------ //    
+// -------------- Find the percentage of change --------------------------------- //
+
+var builtArea = dwComposite.eq(6).clip(ald);
+var builtArea = builtArea.rename(['built_area']);
+
+// Count all pixels.
+var statsTotal = builtArea.reduceRegion({
+    reducer: ee.Reducer.count(),
+    geometry: ald,
+    scale: 10,
+    maxPixels: 1e10
+    });
+var totalPixels = statsTotal.get('built_area');
+
+print('Total Pixels in AoI:', totalPixels);
+
+// Mask 0 pixel values and count remaining pixels.
+var builtAreaMasked = newAntro.selfMask().clip(ald);
+
+var statsMasked = builtAreaMasked.reduceRegion({
+    reducer: ee.Reducer.count(),
+    geometry: ald,
+    scale: 10,
+    maxPixels: 1e10
+    });
+var builtAreaPixels = statsMasked.get('grass');   //takes the name of the first
+print('Total pixels that changed from Natural to Anthropogenic in AoI:', builtAreaPixels);
+
+var fraction = (ee.Number(builtAreaPixels).divide(totalPixels))
+  .multiply(100);
+print('Percentage of AoI that changed from Natural to Anthropogenic:', fraction.format('%.2f'));
+
+
+// **************************************************************************************** //
+// ***************************** E Hydrology Score **************************************** //
+// **************************************************************************************** //
+
+// Note: The most severe algal blooms may be misclassified by Dynamic World as flooded vegetation.
+// Additionally, river islands and small land features adjacent to waterways can sometimes be detected
+// as water. In both cases, this can result in pollution false negatives / positives. Be sure to 
+// manually inspect the pollution hotspots and wider area in the Sentinel-2 visualisation layer to 
+// double check validity of output. 
+
+// 1. Extract Water Bodies from LCCs
+
+// Extract the Water class.
+var WaterArea1 = dwComposite.eq(0);
+var WaterArea2 = dwComposite2.eq(0);
+
+// 2. Mask Water areas
+
+var WaterMasked1 = WaterArea1.clip(ald).updateMask(WaterArea1.eq(1));
+var WaterMasked2 = WaterArea2.clip(ald).updateMask(WaterArea2.eq(1));
+
+var waterMaskedTitle1 = ee.String('Water Areas for Period Starting ')
+    .cat(startDate.slice(0,4));
+Map.addLayer(WaterMasked1, {palette:['cyan']}, waterMaskedTitle1.getInfo());
+var waterMaskedTitle2 = ee.String('Water Areas for Period Starting ')
+    .cat(startDate2.slice(0,4));
+Map.addLayer(WaterMasked2, {palette:['cyan']}, waterMaskedTitle2.getInfo());
+
+// 3. Compute NDCI
+
+var S2masked1 = beforeS2.updateMask(WaterArea1.eq(1));
+var S2masked2 = afterS2.updateMask(WaterArea2.eq(1));
+
+function ndci_f(img){
+  //water mask
+  var ndci = img.normalizedDifference(['B5', 'B4']).rename('NDCI');
+  return img.addBands(ndci);
+}
+
+var before_NDCI = ndci_f(S2masked1);
+var after_NDCI = ndci_f(S2masked2);
+
+
+// print(IMG.get('CLOUDY_PIXEL_PERCENTAGE'))
+
+var viz = {min:0.1,max:0.4,palette:['cyan','orange','red']};
+
+var ndciTitle1 = ee.String('NDCI for Period Starting ')
+    .cat(startDate.slice(0,4));
+Map.addLayer(before_NDCI.select('NDCI'),viz,ndciTitle1.getInfo());
+var ndciTitle2 = ee.String('NDCI for Period Starting ')
+    .cat(startDate2.slice(0,4));
+Map.addLayer(after_NDCI.select('NDCI'),viz,ndciTitle2.getInfo());
+
+
+// Find high-values of NDCI
+
+var before_NDCI_mask = before_NDCI.select('NDCI').gt(0.1);
+var after_NDCI_mask = after_NDCI.select('NDCI').gt(0.1);
+var before_NDCI_mask_title = ee.String('NDCI (Masked) for Period Starting ')
+    .cat(startDate.slice(0,4));
+var after_NDCI_mask_title = ee.String('NDCI (Masked) for Period Starting ')
+    .cat(startDate2.slice(0,4));
+Map.addLayer(before_NDCI_mask,{palette:['black','red']},before_NDCI_mask_title.getInfo());
+Map.addLayer(after_NDCI_mask,{palette:['black','red']},after_NDCI_mask_title.getInfo());
+
+
+// Overlay with Hydroshed to figure out drainage direction
+var wwf = ee.Image('WWF/HydroSHEDS/03DIR');
+var drainageDirection = wwf.select('b1').clip(ald);
+var drainageDirectionVis = {
+  min: 1.0,
+  max: 128.0,
+  palette: [
+    '000000', '023858', '006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b',
+    'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027'
+  ],
+};
+Map.addLayer(drainageDirection, drainageDirectionVis, 'Drainage Direction (see line 441 for instruct)');
+
+// Instructions for use:
+// 1) Use the marker tool (📍) in the map view to define multiple points along a drainage basin.
+// 2) Click the stop drawing tool (🤚).
+// 3) Switch to the Inspector panel (on right).
+// 4) Click the pushpins you have placed on the map to inspect their values. 
+// To interpret the values, consult:
+// developers.google.com/earth-engine/datasets/catalog/WWF_HydroSHEDS_03DIR#bands
+
+//Clean water: NDCI values close to zero or slightly negative (around -0.1 to 0.1)
+//Moderately polluted water: NDCI values between 0.1 and 0.4
+//Highly polluted water: NDCI values above 0.4
+
+
+// // **************************************************************************************** //
+// // ************************** E Global Emissions Score ************************************ //
+// // **************************************************************************************** //
+
+// Important! Manually input dates to define dateRangeStart and dateRangeEnd, ensuring they do not fall 
+// between 2022-07-26 and 2022-08-31, due to a provider outage during this period. The dates input 
+// should correspond exactly to your second (later) monitoring period, or a close time period of
+// equivalent length if your second monitoring period falls within the prohibited dates.
+
+var dateRangeStart = '2022-09-01'; // add your number of weeks (default 4) to the date to the left to calculate the date below
+var dateRangeEnd = '2022-10-01'; // check neither date falls within prohibited period
+
+var collection = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_CH4')
+  .select('CH4_column_volume_mixing_ratio_dry_air_bias_corrected')
+  .filterDate(dateRangeStart, dateRangeEnd);
+
+var band_viz = {
+  min: 1800,
+  max: 2000,
+  palette: ['black', 'blue', 'purple', 'cyan', 'green', 'yellow', 'red']
+};
+
+var methaneSite = collection.mean().clip(ald);
+
+Map.addLayer(methaneSite, band_viz, 'S5P CH4');
+
+
+// Compute mean methane emission within site boundary
+var meanMethane = methaneSite.reduceRegion({
+                  reducer: ee.Reducer.mean(),
+                  geometry: ald,
+                  scale: 1000  //1km
+                  });
+
+// Print result to console
+print('Mean methane emission over site:', meanMethane);  // low: <1800, mid: 1800-2000, high: >2000
+
+
+///////////////////
+
+var collection = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_SO2')
+  .select('SO2_column_number_density')
+  .filterDate(dateRangeStart, dateRangeEnd);
+
+var band_viz = {
+  min: 0.0,
+  max: 0.001,
+  palette: ['black', 'blue', 'purple', 'cyan', 'green', 'yellow', 'red']
+};
+
+var sulphurSite = collection.mean().clip(ald);
+Map.addLayer(sulphurSite, band_viz, 'S5P SO2');
+
+// Compute mean sulphur dioxide emission within site boundary
+var meanSulphur = sulphurSite.reduceRegion({
+                  reducer: ee.Reducer.mean(),
+                  geometry: ald,
+                  scale: 1000  //1km
+                  });
+
+// Print result to console
+print('Mean sulfur dioxide emission over site:', meanSulphur);  // low: <0.001 mid:0.001-0.01 high:>0.1 
+
+
+/////////
+
+var collection = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_NO2')
+  .select('tropospheric_NO2_column_number_density')
+  .filterDate(dateRangeStart, dateRangeEnd);
+
+var band_viz = {
+  min: 0,
+  max: 0.0002,
+  palette: ['black', 'blue', 'purple', 'cyan', 'green', 'yellow', 'red']
+};
+
+var nitrogenSite = collection.mean().clip(ald);
+Map.addLayer(nitrogenSite, band_viz, 'S5P N02');
+
+// Compute mean nitrogen dioxide emission within site boundary
+var meanNitrogen = nitrogenSite.reduceRegion({
+                  reducer: ee.Reducer.mean(),
+                  geometry: ald,
+                  scale: 1000  //1km
+                  });
+
+// Print result to console
+print('Mean nitrogen dioxide emission over site:', meanNitrogen);  // low: 0 - 0.0002 mid:0.0002 - 0.0005 high:>0.0005 
+
+
+
+///////
+
+var collection = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_CO')
+  .select('CO_column_number_density')
+  .filterDate(dateRangeStart, dateRangeEnd);
+
+var band_viz = {
+  min: 0,
+  max: 0.05,
+  palette: ['black', 'blue', 'purple', 'cyan', 'green', 'yellow', 'red']
+};
+
+var carbonSite = collection.mean().clip(ald);
+
+Map.addLayer(carbonSite, band_viz, 'S5P CO');
+
+// Compute mean carbon monoxide emission within site boundary
+var meanCarbon = carbonSite.reduceRegion({
+                  reducer: ee.Reducer.mean(),
+                  geometry: ald,
+                  scale: 1000  //1km
+                  });
+
+// Print result to console
+print('Mean carbon monoxide emission over site:', meanCarbon);  // low:  0 - 0.01  mid:0.01 - 0.05 high:>0.05
