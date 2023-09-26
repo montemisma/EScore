@@ -1,7 +1,7 @@
 // Supplement to the paper: "Breaking the ESG rating divergence: an open geospatial framework
 // for environmental scores" by Rossi et al.
 
-// Script complied by Cristian Rossi and Jack Hepper.
+// Script compiled by Cristian Rossi and Jack Hepper.
 
 // Steps you need to take: 
 
@@ -11,17 +11,23 @@
 
 // STEP 2:
 // Define the variables below. Input the start dates in 'YYYY-MM-DD' format. Input the
-// monitoring peiod length of each period as a number of weeks. (4 is suggested.)
+// monitoring period length of each period as a number of weeks. (4 is suggested.)
 
 var firstPeriodStarts = '2020-08-01';
 var secondPeriodStarts = '2022-08-01';
 var monitoringPeriodWeeks = 4;
 
-// STEP 3 (FINAL):
-// Input variables on line 467 and 468 (Important!). Run script and use outputs under Console 
-// (on right) and Layers (below) to derive E-Score for asset. Note comments on lines 312, 369, 
-// and 445 to assist you in interpretation. An option to generate an overpass turbo
-// script for the OpenStreetMap analyses is also presented to the right of the map.
+// STEP 3:
+// Input variables on line 473 and 474 (Important!). 
+
+// STEP 4 (FINAL): 
+// Run script and use outputs under Console (on right) and Layers (below) to derive E-Score for
+// asset. Note comments on lines 318, 375, and 451 to assist you in interpretation. An option to 
+// generate an overpass turbo script for the OpenStreetMap analyses is also presented to the right 
+// of the map, if you have run the script including OSM integration. Inspect CH4 and Dynamic World 
+// (Classified Composite) layers closely; if there are too many NULL pixels (more than a few in
+// Dynamic World and more than half of the AoI area for CH4), adjust monitoring periods until 
+// layers draw satisfactorily.
 
 // **************************************************************************************** //
 // ************************** E Land Cover Change Score *********************************** //
@@ -440,7 +446,7 @@ var drainageDirectionVis = {
     'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027'
   ],
 };
-Map.addLayer(drainageDirection, drainageDirectionVis, 'Drainage Direction (see line 445 for instruct)');
+Map.addLayer(drainageDirection, drainageDirectionVis, 'Drainage Direction (see line 451 for instruct)');
 
 // Instructions for use:
 // 1) Use the marker tool (📍) in the map view to define multiple points along a drainage basin.
@@ -632,8 +638,7 @@ var text1 = ui.Label('(For OpenStreetMap analyses)', {
 });
 panel.add(text1);
 
-var text2 = ui.Label('Please note: overpass turbo script generation assumes AoI is one solid polygon. If AoI is multiple polygons or a polygon with an internal void, scipt will produce incorrect output. Script can malform on Microsoft Edge; a different browser is recommended.', {
+var text2 = ui.Label('Please note: overpass turbo script generation assumes AoI is one solid polygon. If AoI is multiple polygons or a polygon with an internal void, script will produce incorrect output. Script can malform on Microsoft Edge; a different browser is recommended.', {
   fontSize: '10px'
 });
 panel.add(text2);
-
