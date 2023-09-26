@@ -1,4 +1,4 @@
-# EScore
+# EScore methodology
 Supplement to the paper: "Breaking the ESG rating divergence: an open geospatial framework for environmental scores" by Rossi et al.
 
 Instructions: 
@@ -8,3 +8,4 @@ Instructions:
 Visual overview of the methodology:
 
 <img width="461" alt="Picture1" src="https://github.com/montemisma/EScore/assets/66991813/4b6ae4d0-77e9-4ec9-a6e6-4794e15028ce">
+
