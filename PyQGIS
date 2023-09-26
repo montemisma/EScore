@@ -1,0 +1,443 @@
+############# PyQGIS script for E-Score derivation #############
+
+###### Calculates GSOC, CEPF, NHM BII, HWSD, and WRI water stress inputs ######
+###### Use GEE+OSM script to calculate all other inputs ######
+
+#### This is a first draft and future versions will need adjustment 
+#### to run more efficiently.
+ 
+#### STEP 1: Download items and place them in one directory. Unzip .zips but do 
+#### not otherwise remove items from enclosing folders if present (with one exception):
+######### Soil Organic Carbon:
+#### https://data.apps.fao.org/catalog/iso/7730e747-eb73-49c9-bfe6-84ebae718743
+#### Download - Global Soil Organic Carbon Map V1.5 (a small link, above the title 'Data and Resources')
+######### FAO Harmonized World Soil Database 2.0:
+#### https://gaez.fao.org/pages/hwsd
+#### Download - HWSD v2.0 Raster
+#### AND
+#### https://data.isric.org/geonetwork/srv/api/records/54aebf11-ec73-4ff8-bf6c-ecff4b0725ea
+#### Download - HWSDv2 SQLite data set
+######### NHM Biodiversity Intactness Index:
+#### https://data.nhm.ac.uk/dataset/global-map-of-the-biodiversity-intactness-index-from-newbold-et-al-2016-science
+#### Important! Download AND extract lbii.asc to your main data directory
+######### CEPF Biodiversity Hotspots:
+#### https://zenodo.org/record/3261807#.X8_iaNhKg2y
+#### Download - hotspots_2016_1
+######### WRI Water:
+#### https://www.wri.org/data/aqueduct-global-maps-30-data 
+#### Important! Download and RENAME FOLDER TO 'WRI' (capital w, capital r, capital i)
+
+#### STEP 2: Set AoI buffer distance in km (this is only for WRI calculations) and
+#### define the path to the directory containing your downloaded data and to shapefile (in WGS-84):
+
+AoIbufferWRI = 1
+pathToDownloadedDataDirectory = 'x' #'/path/to/directory'
+pathToShapefile = 'x' #'/path/to/AOIfile.shp'
+
+#### STEP 3 (FINAL): Click 'run' and derive E-Score from values in Layers.
+
+#### Note that this script will take a while to run (~3 mins as tested on an
+#### M1 MacBook Air; longer with geographically larger shapefiles than a typical asset) 
+#### due to the suboptimal nature of the HWSD aggregation processes. If you do not require HWSD
+#### calculations, comment out this portion of the script for enhanced runtime.
+ 
+##################################################################################
+ 
+########### Preparation ##########
+ 
+#### Add shapefile to map
+AoI = QgsVectorLayer(pathToShapefile,'AoI Polygon', 'ogr')
+#### Check validity as QGIS does not by default complain about an incorrect pathname
+if not AoI.isValid():
+   print("AoI polygon failed to load!")
+#### Add the layer to the map
+QgsProject.instance().addMapLayer(AoI)
+#### Set working directory
+os.chdir(pathToDownloadedDataDirectory)
+
+############# GSOC #############
+
+#### Add raster to map
+GSOCmap = QgsRasterLayer('GSOCmap1.5.0.tif', 'GSOCmap')
+if not GSOCmap.isValid():
+   print("GSOC raster failed to load!")
+QgsProject.instance().addMapLayer(GSOCmap)
+#### Clip raster by extent
+parameters = {
+   'INPUT': GSOCmap,
+   'MASK': AoI,
+   'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+clippedGSOCmap = processing.run('gdal:cliprasterbymasklayer', parameters)
+#### Find the average pixel value for clippedGSOCmap
+clipped_layer = QgsRasterLayer(clippedGSOCmap['OUTPUT'], 'Clipped GSOC Map')
+provider = clipped_layer.dataProvider()
+extent = clipped_layer.extent()
+stats = provider.bandStatistics(1, QgsRasterBandStats.All, extent, 0)
+average_pixel_value = stats.mean
+#### Update the Layers title with average pixel value
+title = 'GSOC Map clipped to AoI (Avg Pixel Value: {:.2f} t ha-1)'.format(average_pixel_value)
+clipped_layer.setName(title)
+#### Add the clipped raster layer to the map
+QgsProject.instance().addMapLayer(clipped_layer)
+ 
+############### CEPF Hotspots ##############
+ 
+#### Add shapefile to map
+CEPF = QgsVectorLayer('hotspots_2016_1/hotspots_2016_1.shp', 'CEPF Hotspots (Intersection Check Failed)', 'ogr')
+if not CEPF.isValid():
+   print("CEPF shapefile failed to load!")
+ 
+#### Test for intersection between CEPF and AoI Polygon
+CEPF_intersects_AoI = False
+for aoi_feature in AoI.getFeatures():
+   for cepf_feature in CEPF.getFeatures():
+       if cepf_feature.geometry().intersects(aoi_feature.geometry()):
+           CEPF_intersects_AoI = True
+           break
+   if CEPF_intersects_AoI:
+       break
+ 
+#### Amend title to reflect this
+if CEPF_intersects_AoI:
+   CEPFTitle = 'CEPF Hotspots (Intersection = TRUE)'
+else:
+   CEPFTitle = 'CEPF Hotspots (Intersection = FALSE)'
+CEPF.setName(CEPFTitle)
+QgsProject.instance().addMapLayer(CEPF)
+ 
+############### NHM BII ############### 
+ 
+#### Define the CRS
+wgs84_crs = QgsCoordinateReferenceSystem('EPSG:4326')
+ 
+#### Load the raster layer
+path_to_raster = 'lbii.asc'
+NHMBII = QgsRasterLayer(path_to_raster, 'NHM_BII')
+ 
+#### Check if the layer was loaded successfully
+if not NHMBII.isValid():
+   print("NHMBII failed to load!")
+else:
+   NHMBII.setCrs(wgs84_crs)
+ 
+#### Add the raster layer to the QGIS project
+QgsProject.instance().addMapLayer(NHMBII)
+ 
+#### Clip raster by extent
+parameters = {
+   'INPUT': NHMBII,
+   'MASK': AoI,
+   'OUTPUT': 'TEMPORARY_OUTPUT',
+   'SOURCE_CRS': wgs84_crs
+}
+clippedNHMBII = processing.run('gdal:cliprasterbymasklayer', parameters)
+
+#### Find the average pixel value for clippedGSOCmap
+clipped_layer = QgsRasterLayer(clippedNHMBII['OUTPUT'], 'Clipped NHM_BII')
+provider = clipped_layer.dataProvider()
+extent = clipped_layer.extent()
+stats = provider.bandStatistics(1, QgsRasterBandStats.All, extent, 0)
+average_pixel_value = stats.mean
+
+#### Update the legend title with average pixel value
+title = 'NHM_BII clipped to AoI (Avg Pixel Value: {:.2f})'.format(average_pixel_value)
+clipped_layer.setName(title)
+
+#### Add the clipped raster layer to the map
+QgsProject.instance().addMapLayer(clipped_layer)
+ 
+########## HWSD - very slow, needs reimplementing if to be deployed at scale #########
+##### Obvious place to start would be providing HWSD_LAYERS_EDITED_AGGREGATED pre-processed ###### 
+ 
+#### Import raster
+
+path_to_raster = 'HWSD2_RASTER/HWSD2.bil'
+HWSDraster = QgsRasterLayer(path_to_raster, 'HWSD_raster')
+if not HWSDraster.isValid():
+   print("HWSD raster failed to load!")
+QgsProject.instance().addMapLayer(HWSDraster)
+
+#### Clip raster by AoI extent and add to map
+parameters = {
+   'INPUT': HWSDraster,
+   'MASK': AoI,
+   'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+clippedHWSDraster = processing.run('gdal:cliprasterbymasklayer', parameters)
+clipped_layer = QgsRasterLayer(clippedHWSDraster['OUTPUT'], 'Clipped HWSD_raster')
+QgsProject.instance().addMapLayer(clipped_layer)
+
+#### Import HWSD2_LAYERS D1 data
+sqlite_info = 'HWSD2.sqlite|layername=HWSD2_LAYERS|subset=LAYER="D1"'
+layer = QgsVectorLayer(sqlite_info, 'HWSD_LAYERS', 'ogr')
+if not layer.isValid():
+    print("HWSD info failed to load!")
+else:
+    QgsProject.instance().addMapLayer(layer)
+    
+#### Save a temporary copy of this to edit
+layer.selectAll()
+clone_layer = processing.run("native:saveselectedfeatures", {'INPUT': layer, 'OUTPUT': 'memory:'})['OUTPUT']
+layer.removeSelection()
+QgsProject.instance().addMapLayer(clone_layer)
+clone_layer.setName("HWSD_LAYERS_EDITED")
+
+#### Divide SHARE by 100 to create SHARE_AS_DECIMAL
+pr = clone_layer.dataProvider()
+pr.addAttributes([QgsField("SHARE_AS_DECIMAL", QVariant.Double)])
+clone_layer.updateFields()
+for feature in clone_layer.getFeatures():
+ pr.changeAttributeValues({feature.id() : {pr.fieldNameMap()['SHARE_AS_DECIMAL'] : feature['SHARE']/100}})
+ 
+#### Add fields called SEQ1_SHARE, SEQ1_CEC_SOIL, SEQ2_SHARE, SEQ2_CEC_SOIL... 
+#### etc up to 12 (the max sequence value)
+newSeqFields = []
+for i in range(1, 13):
+    newSeqFields.append(f'SEQ{i}_SHARE_AS_DECIMAL')
+    newSeqFields.append(f'SEQ{i}_CEC_SOIL')
+    
+for i in range(0, 24):
+    pr.addAttributes([QgsField(newSeqFields[i], QVariant.Double)])
+    clone_layer.updateFields()
+    for feature in clone_layer.getFeatures():
+        pr.changeAttributeValues({feature.id() : {pr.fieldNameMap()[newSeqFields[i]] : 0}})
+
+#### Populate these new fields with their respective values and condense
+
+# Populate the SHARE fields
+for i in range(1, 13):
+    for feature in clone_layer.getFeatures():
+        seq_value = feature['SEQUENCE']
+        sha_value = feature['SHARE_AS_DECIMAL']
+        if seq_value == i:
+            pr.changeAttributeValues({feature.id() : {pr.fieldNameMap()[newSeqFields[i*2-2]] : sha_value}})
+
+# Populate the CEC fields
+for i in range(1, 13):
+    for feature in clone_layer.getFeatures():
+        seq_value = feature['SEQUENCE']
+        cec_value = feature['CEC_SOIL']
+        if seq_value == i:
+            pr.changeAttributeValues({feature.id() : {pr.fieldNameMap()[newSeqFields[i*2-1]] : cec_value}})
+
+## Condense fields so only one row per HWSD2_SMU_ID and remove unnecessary fields
+
+# Remove 47 unnecessary fields
+for i in range(0, 47):
+    if clone_layer.dataProvider().capabilities() & QgsVectorDataProvider.DeleteAttributes:
+        res = clone_layer.dataProvider().deleteAttributes([2])
+        clone_layer.updateFields()
+
+# Strings shouldn't really be used for this - the below is not an ideal approach (but does work)
+aggregates = "[{'aggregate': 'first_value','delimiter': ',','input': '\"ID\"','length': 0,'name': 'ID','precision': 0,'sub_type': 0,'type': 4,'type_name': 'int8'},{'aggregate': 'first_value','delimiter': ',','input': '\"HWSD2_SMU_ID\"','length': 0,'name': 'HWSD2_SMU_ID','precision': 0,'sub_type': 0,'type': 2,'type_name': 'integer'}"
+aggregates1 = ",{'aggregate': 'maximum','delimiter': ',','input': '\""
+aggregates2 = "\"','length': 0,'name': '"
+aggregates3 = "','precision': 0,'sub_type': 0,'type': 6,'type_name': 'double precision'},{'aggregate': 'maximum','delimiter': ',','input': '\""
+aggregatesfin = aggregates+aggregates1+newSeqFields[0]+aggregates2+newSeqFields[0]+aggregates3
+
+for i in range(1,24):
+    aggregatesfin = aggregatesfin + newSeqFields[i] + aggregates2 + newSeqFields[i] 
+    if i != 23:
+        aggregatesfin = aggregatesfin + aggregates3
+aggregates4 = "','precision': 0,'sub_type': 0,'type': 6,'type_name': 'double precision'}]"
+aggregatesfin = aggregatesfin+aggregates4
+
+parameters = {
+    'AGGREGATES': eval(aggregatesfin),
+    'GROUP_BY': '"HWSD2_SMU_ID"',
+    'INPUT': clone_layer,
+    'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+aggregated_cloned = processing.run('native:aggregate', parameters)
+aggregated_cloned_layer = aggregated_cloned['OUTPUT']
+QgsProject.instance().addMapLayer(aggregated_cloned_layer)
+aggregated_cloned_layer.setName("HWSD_LAYERS_EDITED_AGGREGATED")
+
+#### Create new field eq to (SEQ1_SHARE * SEQ1_CECSOIL) + (
+#### SEQ2_SHARE * SEQ2_CECSOIL) etc
+
+new_field = QgsField("WEIGHTED_AVERAGE_CEC", QVariant.Double)
+aggregated_cloned_layer.dataProvider().addAttributes([new_field])
+aggregated_cloned_layer.updateFields()
+
+expression_text = ""
+for i in range(0, 24, 2):
+    field1 = newSeqFields[i]
+    field2 = newSeqFields[i + 1]
+    expression_text += f"feature['{field1}'] * feature['{field2}'] + "
+expression_text = expression_text[:-3]
+
+for feature in aggregated_cloned_layer.getFeatures():
+    aggregated_cloned_layer.dataProvider().changeAttributeValues({feature.id() : {aggregated_cloned_layer.dataProvider().fieldNameMap()['WEIGHTED_AVERAGE_CEC'] : eval(expression_text)}})
+    aggregated_cloned_layer.updateFields()
+
+#### Convert Clipped HWSD_raster to points
+
+raster_layer = QgsProject.instance().mapLayersByName('Clipped HWSD_raster')[0]
+parameters = {
+    'INPUT_RASTER': raster_layer,
+    'RASTER_BAND': 1,
+    'FIELD_NAME': 'HWSD2_SMU_ID',
+    'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+result = processing.run('native:pixelstopoints', parameters)
+points_layer = result['OUTPUT']
+QgsProject.instance().addMapLayer(points_layer)
+points_layer.setName("Clipped HWSD_raster to points")
+
+#### Join HWSD_LAYERS_EDITED_AGGREGATED with points
+
+# New field that is HWSD2_SMU_ID_INT from double to match data types
+points_layer.dataProvider().addAttributes([QgsField("HWSD2_SMU_ID_INT", QVariant.Int)])
+points_layer.updateFields()
+for feature in points_layer.getFeatures():
+    points_layer.dataProvider().changeAttributeValues({feature.id() : {points_layer.dataProvider().fieldNameMap()['HWSD2_SMU_ID_INT'] : feature['HWSD2_SMU_ID']}})
+
+# Join fields
+parameters = {
+    'INPUT': points_layer,
+    'FIELD': 'HWSD2_SMU_ID_INT',
+    'INPUT_2': aggregated_cloned_layer,
+    'FIELD_2': 'HWSD2_SMU_ID',
+    'FIELDS_TO_COPY': 'WEIGHTED_AVERAGE_CEC',
+    'METHOD': 0,
+    'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+result = processing.run('qgis:joinattributestable', parameters)
+points_layer_mod = result['OUTPUT']
+QgsProject.instance().addMapLayer(points_layer_mod)
+points_layer_mod.setName("Clipped HWSD_raster to points joined")
+
+#### Calculate our weighted CEC value
+
+mean = points_layer_mod.aggregate(QgsAggregateCalculator.Mean, "WEIGHTED_AVERAGE_CEC")
+title = 'HWSD_raster clipped to AoI (Weighted Avg CEC D1: {:.2f})'.format(mean[0])
+clipped_layer.setName(title)
+
+############## WRI Water Stress ##############
+
+#### NB: Buffer approach is broadly accurate for shapefiles that are not region/country-sized, 
+#### but below approach ideally needs reworking using UTM zone determination + buffer in m to be 
+#### less unpolished / have tidier corners
+
+## Buffer AoI by AoIbufferWRI (slightly janky way using affine transform, but approach does 
+## not deteriorate with latitude, which simple buffer in deg would)
+
+import numpy
+
+buffer = AoIbufferWRI * 1000
+latMax = AoI.extent().yMaximum()
+latMaxR = 3.14159 * latMax / 180
+m_per_deg_lat = 111132.954 - 559.822 * numpy.cos( 2 * latMaxR ) + 1.175 * numpy.cos( 4 * latMaxR)
+m_per_deg_lon = 111132.954 * numpy.cos( latMaxR )
+lat_expansion_deg = buffer / m_per_deg_lat
+lon_expansion_deg = buffer / m_per_deg_lon
+
+parameters = {
+   'INPUT': AoI,
+   'DELTA_X': 0,
+   'DELTA_Y': float(lat_expansion_deg),
+   'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+north_expansion = processing.run("native:affinetransform", parameters)
+
+parameters = {
+   'INPUT': AoI,
+   'DELTA_X': 0,
+   'DELTA_Y': float(-1*lat_expansion_deg),
+   'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+south_expansion = processing.run("native:affinetransform", parameters)
+
+parameters = {
+   'INPUT': AoI,
+   'DELTA_X': float(lon_expansion_deg),
+   'DELTA_Y': 0,
+   'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+east_expansion = processing.run("native:affinetransform", parameters)
+
+parameters = {
+   'INPUT': AoI,
+   'DELTA_X': float(-1*lon_expansion_deg),
+   'DELTA_Y': 0,
+   'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+west_expansion = processing.run("native:affinetransform", parameters)
+
+overlays = [north_expansion['OUTPUT'], east_expansion['OUTPUT'], west_expansion['OUTPUT']]
+parameters = {
+    'INPUT': south_expansion['OUTPUT'],
+    'OVERLAYS': overlays,
+    'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+union = processing.run("qgis:multiunion", parameters)
+union = union['OUTPUT'] 
+dissolve = processing.run("native:dissolve", {'INPUT':union,'OUTPUT':'TEMPORARY OUTPUT'})
+bufferedAoI = dissolve['OUTPUT']
+bufferedAoI = QgsVectorLayer(bufferedAoI, "AoI + buffer", "ogr")
+QgsProject.instance().addMapLayer(bufferedAoI)
+bufferedAoI.setName("AoI + buffer (approx)")
+
+## Import WRI and add to map
+
+WRI = QgsVectorLayer('WRI/baseline/annual/arcmap/y2019m07d12_aqueduct30_v01.gdb', 'WRI Water Stress', 'ogr')
+if not WRI.isValid():
+   print("WRI failed to load!")
+WRIStress = QgsProject.instance().addMapLayer(WRI)
+
+## Clip vector by mask layer
+
+parameters = {
+   'INPUT': WRIStress,
+   'MASK': bufferedAoI,
+   'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+clippedWRImap = processing.run('gdal:clipvectorbypolygon', parameters)
+clipped_layer = QgsVectorLayer(clippedWRImap['OUTPUT'], 'Clipped WRI Water Stress')
+QgsProject.instance().addMapLayer(clipped_layer)
+
+## Add geometry attributes 
+
+parameters = {
+    'INPUT': clipped_layer,
+    'CALC_METHOD': 0,
+    'OUTPUT': 'TEMPORARY_OUTPUT'
+}
+WRIwithaddedgeom = processing.run('qgis:exportaddgeometrycolumns', parameters)
+QgsProject.instance().addMapLayer(WRIwithaddedgeom['OUTPUT'])
+
+## Sum "area" field (NOT "Shape_Area" as this does not account for clipped boundaries)
+## and assign to variable
+
+area_sum = WRIwithaddedgeom['OUTPUT'].aggregate(QgsAggregateCalculator.Sum, 'area')
+area_sum = area_sum[0]
+
+## Create a new field "weight" that divides each instance of "area" by sum_area
+
+new_field = QgsField("WEIGHT", QVariant.Double)
+WRIwithaddedgeom['OUTPUT'].dataProvider().addAttributes([new_field])
+WRIwithaddedgeom['OUTPUT'].updateFields()
+expression_text = "feature['area'] / area_sum"
+for feature in WRIwithaddedgeom['OUTPUT'].getFeatures():
+    if not isinstance(feature['area'], QVariant):
+        WRIwithaddedgeom['OUTPUT'].dataProvider().changeAttributeValues({feature.id() : {WRIwithaddedgeom['OUTPUT'].dataProvider().fieldNameMap()['WEIGHT'] : eval(expression_text)}})
+        WRIwithaddedgeom['OUTPUT'].updateFields()
+
+## Multiply each "bws_raw" by "weight" and add together, then set title
+
+new_field = QgsField("WEIGHTED_BWS_RAW", QVariant.Double)
+WRIwithaddedgeom['OUTPUT'].dataProvider().addAttributes([new_field])
+WRIwithaddedgeom['OUTPUT'].updateFields()
+expression_text = "feature['bws_raw'] * feature['WEIGHT']"
+for feature in WRIwithaddedgeom['OUTPUT'].getFeatures():
+    if not isinstance(feature['bws_raw'], QVariant):
+        if not isinstance(feature['area'], QVariant):
+            WRIwithaddedgeom['OUTPUT'].dataProvider().changeAttributeValues({feature.id() : {WRIwithaddedgeom['OUTPUT'].dataProvider().fieldNameMap()['WEIGHTED_BWS_RAW'] : eval(expression_text)}})
+            WRIwithaddedgeom['OUTPUT'].updateFields()
+
+title = WRIwithaddedgeom['OUTPUT'].aggregate(QgsAggregateCalculator.Sum, 'WEIGHTED_BWS_RAW')
+title = title[0]
+title = 'WRI Water Stress Clipped to AoI + buffer (Avg Value: {:.2f})'.format(title)
+clipped_layer.setName(title)
